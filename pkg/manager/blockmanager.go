@@ -1,4 +1,4 @@
-package main
+package manager
 
 import (
 	"context"
@@ -8,11 +8,18 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/sirupsen/logrus"
 
-	"github.com/rodoufu/btc-block-time/pkg/blockchain"
-	"github.com/rodoufu/btc-block-time/pkg/btc"
 	"github.com/rodoufu/btc-block-time/pkg/entity"
 	"github.com/rodoufu/btc-block-time/pkg/persistence"
+	"github.com/rodoufu/btc-block-time/pkg/providers/blockchain"
+	"github.com/rodoufu/btc-block-time/pkg/providers/btc"
 )
+
+type BlockManager interface {
+	LoadBlocks(ctx context.Context, log *logrus.Entry) error
+	CheckLongerThan(log *logrus.Entry, threshold time.Duration)
+	ShouldLoad() bool
+	Len() int
+}
 
 type blockManager struct {
 	blocks          []*entity.Block
@@ -306,4 +313,20 @@ func (bm *blockManager) ShouldLoad() bool {
 
 func (bm *blockManager) Len() int {
 	return len(bm.blocks)
+}
+
+func NewBlockManager() BlockManager {
+	return &blockManager{
+		blocksBackwards: nil,
+		blocksChan:      nil,
+		blocks:          nil,
+		latestBlock:     nil,
+
+		fileName:                  "blocks.csv",
+		client:                    resty.New(),
+		saveEvery:                 10 * time.Minute,
+		waitTime:                  50 * time.Millisecond,
+		maxParallelRequests:       12,
+		waitAfterNumberOfRequests: 100,
+	}
 }

@@ -32,5 +32,5 @@ type BlockResp struct {
 }
 
 func (r *BlockResp) IsValid() bool {
-	return r.ErrCode == 0 && r.Data != nil
+	return r != nil && r.ErrCode == 0 && r.Data != nil
 }

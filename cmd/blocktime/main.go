@@ -7,10 +7,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/go-resty/resty/v2"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/exp/rand"
 	"gonum.org/v1/gonum/stat/distuv"
+
+	"github.com/rodoufu/btc-block-time/pkg/manager"
 )
 
 func main() {
@@ -33,6 +34,7 @@ func main() {
 		cancel()
 	}()
 
+	// Calculating the odds of a block taking more than 2 hours
 	poisson := distuv.Poisson{
 		Lambda: 12,
 		Src:    rand.NewSource(uint64(time.Now().UnixMilli())),
@@ -43,16 +45,7 @@ func main() {
 		"chances_of_one_in": 1 / prob,
 	}).Info("chances of not getting a block within 120 minutes")
 
-	bm := &blockManager{
-		blocks:                    nil,
-		latestBlock:               nil,
-		fileName:                  "blocks.csv",
-		client:                    resty.New(),
-		saveEvery:                 10 * time.Minute,
-		waitTime:                  50 * time.Millisecond,
-		maxParallelRequests:       12,
-		waitAfterNumberOfRequests: 100,
-	}
+	bm := manager.NewBlockManager()
 	var err error
 	done := ctx.Done()
 
