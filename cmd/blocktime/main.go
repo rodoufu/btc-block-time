@@ -9,6 +9,8 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/exp/rand"
+	"gonum.org/v1/gonum/stat/distuv"
 )
 
 func main() {
@@ -31,6 +33,16 @@ func main() {
 		cancel()
 	}()
 
+	poisson := distuv.Poisson{
+		Lambda: 12,
+		Src:    rand.NewSource(uint64(time.Now().UnixMilli())),
+	}
+	prob := poisson.Prob(0)
+	log.WithFields(logrus.Fields{
+		"probability":       prob * 100,
+		"chances_of_one_in": 1 / prob,
+	}).Info("chances of not getting a block within 120 minutes")
+
 	bm := &blockManager{
 		blocks:                    nil,
 		latestBlock:               nil,
@@ -38,7 +50,7 @@ func main() {
 		client:                    resty.New(),
 		saveEvery:                 10 * time.Minute,
 		waitTime:                  50 * time.Millisecond,
-		maxParallelRequests:       10,
+		maxParallelRequests:       12,
 		waitAfterNumberOfRequests: 100,
 	}
 	var err error
