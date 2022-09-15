@@ -1,4 +1,4 @@
-package data
+package persistence
 
 import (
 	"context"
@@ -19,6 +19,10 @@ func ReadBlocks(ctx context.Context, fileName string) ([]*btc.Block, error) {
 	}
 
 	csvReader := csv.NewReader(csvFile)
+	_, err = csvReader.Read()
+	if err == io.EOF {
+		return nil, nil
+	}
 	var lineNumber int64 = 0
 	var blocks []*btc.Block
 	for {
@@ -58,13 +62,23 @@ func ReadBlocks(ctx context.Context, fileName string) ([]*btc.Block, error) {
 }
 
 func WriteBlocks(ctx context.Context, fileName string, blocks []*btc.Block) error {
-	csvFile, err := os.Open(fileName)
+	if _, err := os.Stat(fileName); err == nil || !errors.Is(err, os.ErrNotExist) {
+		if errRemove := os.Remove(fileName); errRemove != nil {
+			return errors.Wrapf(errRemove, "problme removing file: %v", fileName)
+		}
+	}
+	csvFile, err := os.Create(fileName)
 	if err != nil {
 		return errors.Wrapf(err, "problem opening: %v", fileName)
 	}
 
 	csvWriter := csv.NewWriter(csvFile)
 	defer csvWriter.Flush()
+
+	if err = csvWriter.Write([]string{"height", "timestamp", "hash"}); err != nil {
+		return errors.Wrap(err, "problem writing header")
+	}
+
 	lineNumber := 0
 	for _, block := range blocks {
 		lineNumber++
