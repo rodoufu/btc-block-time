@@ -19,6 +19,7 @@ func ReadBlocks(ctx context.Context, fileName string) ([]*entity.Block, error) {
 	if err != nil {
 		return nil, errors.Wrapf(err, "problem opening: %v", fileName)
 	}
+	defer csvFile.Close()
 
 	csvReader := csv.NewReader(csvFile)
 	_, err = csvReader.Read()
@@ -73,6 +74,7 @@ func WriteBlocks(ctx context.Context, fileName string, blocks []*entity.Block) e
 	if err != nil {
 		return errors.Wrapf(err, "problem opening: %v", fileName)
 	}
+	defer csvFile.Close()
 
 	csvWriter := csv.NewWriter(csvFile)
 	defer csvWriter.Flush()

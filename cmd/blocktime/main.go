@@ -18,22 +18,27 @@ import (
 )
 
 func loadBlocks(
-	ctx context.Context, log *logrus.Entry, fileName string,
+	ctx context.Context, log *logrus.Entry, blocks []*entity.Block, fileName string,
 	saveEvery, waitTime time.Duration, maxParallelRequests, waitAfterNumberOfRequests int64,
-) ([]*entity.Block, error) {
+) ([]*entity.Block, *entity.Block, error) {
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithCancel(ctx)
 	defer cancel()
 	done := ctx.Done()
 
 	log.Info("reading blocks")
-	blocks, err := persistence.ReadBlocks(ctx, fileName)
-	if err != nil {
-		log.WithError(err).Warn("problem reading blocks")
+	var err error
+	if len(blocks) == 0 {
+		blocks, err = persistence.ReadBlocks(ctx, fileName)
+		if err != nil {
+			log.WithError(err).Warn("problem reading blocks")
+		}
 	}
 
 	log.Info("scheduling write blocks")
-	defer persistBlocks(blocks, log, fileName)
+	defer func() {
+		persistBlocks(blocks, log, fileName)
+	}()
 
 	nextHeightToFetch := int64(len(blocks))
 
@@ -99,7 +104,7 @@ func loadBlocks(
 	for i := nextHeightToFetch; i < latestBlock.Height; i++ {
 		select {
 		case <-done:
-			return blocks, ctx.Err()
+			return blocks, latestBlock.ToBlock(), ctx.Err()
 		case <-ticker.C:
 			persistBlocks(blocks, log, fileName)
 		default:
@@ -147,7 +152,7 @@ func loadBlocks(
 	}
 
 	waitGroup.Wait()
-	return blocks, nil
+	return blocks, latestBlock.ToBlock(), nil
 }
 
 func persistBlocks(blocks []*entity.Block, log *logrus.Entry, fileName string) {
@@ -185,11 +190,27 @@ func main() {
 	}()
 
 	fileName := "blocks.csv"
-	blocks, err := loadBlocks(
-		ctx, log, fileName, 10*time.Minute, 50*time.Millisecond, 10, 100,
-	)
-	if err != nil && err != context.Canceled {
-		log.WithError(err).Fatal("problem loading blocks")
+	var blocks []*entity.Block
+	var lastBlock *entity.Block
+	var err error
+	done := ctx.Done()
+
+FindBlocks:
+	for len(blocks) == 0 || blocks[len(blocks)-1].Height != lastBlock.Height {
+		select {
+		case <-done:
+			break FindBlocks
+		default:
+			log.WithField("block_so_far", len(blocks)).Info("loading blocks")
+			blocks, lastBlock, err = loadBlocks(
+				ctx, log, blocks, fileName,
+				10*time.Minute, 50*time.Millisecond, 10, 100,
+			)
+			if err != nil && err != context.Canceled {
+				log.WithError(err).Fatal("problem loading blocks")
+				time.Sleep(time.Second)
+			}
+		}
 	}
 
 	lenBlocks := len(blocks)
