@@ -15,11 +15,12 @@ import (
 )
 
 type blockManager struct {
-	blocks      []*entity.Block
-	latestBlock *entity.Block
-	fileName    string
-	client      *resty.Client
-	blocksChan  chan *entity.Block
+	blocks          []*entity.Block
+	blocksBackwards []*entity.Block
+	latestBlock     *entity.Block
+	fileName        string
+	client          *resty.Client
+	blocksChan      chan *entity.Block
 
 	saveEvery                 time.Duration
 	waitTime                  time.Duration
@@ -67,12 +68,17 @@ func (bm *blockManager) LoadBlocks(ctx context.Context, log *logrus.Entry) error
 	log.Info("starting routine to add blocks")
 	go bm.saveInMemory(ctx)
 
+	go func() {
+		bm.fetchBlocksBackwards(ctx, log)
+		cancel()
+	}()
+
 	waitGroup := &sync.WaitGroup{}
 	log.Info("getting blocks")
 	initialTime := time.Now()
 	ticker := time.NewTicker(bm.saveEvery)
 	defer ticker.Stop()
-	for i := nextHeightToFetch; i < bm.latestBlock.Height; i++ {
+	for i := nextHeightToFetch; !bm.hasFoundAll() && i < bm.latestBlock.Height; i++ {
 		select {
 		case <-done:
 			return ctx.Err()
@@ -90,7 +96,70 @@ func (bm *blockManager) LoadBlocks(ctx context.Context, log *logrus.Entry) error
 	}
 
 	waitGroup.Wait()
+
+	if bm.hasFoundAll() {
+		log.Info("merging lists")
+		for i := len(bm.blocksBackwards) - 1; i >= 0; i-- {
+			if bm.blocksBackwards[i].Height == bm.blocks[len(bm.blocks)-1].Height+1 {
+				bm.blocks = append(bm.blocks, bm.blocksBackwards[i])
+			}
+		}
+	}
+
 	return nil
+}
+
+func (bm *blockManager) hasFoundAll() bool {
+	return (bm.blocks != nil && bm.latestBlock != nil && bm.blocks[len(bm.blocks)-1].Height == bm.latestBlock.Height) ||
+		(bm.blocks != nil && bm.blocksBackwards != nil && bm.blocks[len(bm.blocks)-1].Height >= bm.blocksBackwards[len(bm.blocksBackwards)-1].Height)
+}
+
+func (bm *blockManager) fetchBlocksBackwards(ctx context.Context, log *logrus.Entry) {
+	done := ctx.Done()
+	bm.blocksBackwards = append(bm.blocksBackwards, bm.latestBlock)
+
+	firstBlockBackwards := bm.blocksBackwards[len(bm.blocksBackwards)-1]
+	initialTime := time.Now()
+	for len(bm.blocks) == 0 || firstBlockBackwards.Height > bm.blocks[len(bm.blocks)-1].Height {
+		select {
+		case <-done:
+			return
+		default:
+			log.WithField("day", firstBlockBackwards.Timestamp).
+				Info("getting blocks")
+			blocksBackwards, err := blockchain.GetBlocksForDay(
+				ctx, bm.client, firstBlockBackwards.Timestamp,
+			)
+
+			if err != nil {
+				log.WithError(err).Error("problem finding blocks for day")
+				time.Sleep(bm.waitTime)
+				continue
+			}
+
+			soFar := time.Now().Sub(initialTime)
+			blockCount := int64(len(bm.blocksBackwards))
+			blockTime := time.Millisecond * time.Duration(soFar.Milliseconds()/blockCount)
+			timeToFinish := time.Duration(bm.blocksBackwards[len(bm.blocksBackwards)-1].Height-bm.blocks[len(bm.blocks)-1].Height) * blockTime
+
+			log.WithFields(logrus.Fields{
+				"block_count_request": len(blocksBackwards),
+				"block_count":         blockCount,
+				"time_to_finish":      timeToFinish,
+				//"first_block_backwards": fmt.Sprintf("%+v", *firstBlockBackwards),
+				//"last_block":            fmt.Sprintf("%+v", *bm.blocks[len(bm.blocks)-1]),
+				"first_block_backwards_height": firstBlockBackwards.Height,
+				"last_block_height":            bm.blocks[len(bm.blocks)-1].Height,
+			}).Info("got blocks")
+			for i, block := range blocksBackwards {
+				if i == 0 {
+					continue
+				}
+				bm.blocksBackwards = append(bm.blocksBackwards, block.ToBlock())
+			}
+		}
+		firstBlockBackwards = bm.blocksBackwards[len(bm.blocksBackwards)-1]
+	}
 }
 
 func (bm *blockManager) fetchBlock(
