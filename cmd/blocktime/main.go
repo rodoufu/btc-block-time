@@ -19,6 +19,7 @@ import (
 
 func loadBlocks(
 	ctx context.Context, log *logrus.Entry, fileName string,
+	saveEvery, waitTime time.Duration, maxParallelRequests, waitAfterNumberOfRequests int64,
 ) ([]*entity.Block, error) {
 	var cancel context.CancelFunc
 	ctx, cancel = context.WithCancel(ctx)
@@ -32,24 +33,9 @@ func loadBlocks(
 	}
 
 	log.Info("scheduling write blocks")
-	defer func() {
-		if len(blocks) == 0 {
-			log.Warn("no blocks to save")
-			return
-		}
-
-		log.WithField("number_of_blocks", len(blocks)).Info("saving blocks")
-		writeCtx := context.Background()
-		err = persistence.WriteBlocks(writeCtx, fileName, blocks)
-		if err != nil {
-			log.WithError(err).Error("problem saving blocks")
-		}
-	}()
+	defer persistBlocks(blocks, log, fileName)
 
 	nextHeightToFetch := int64(len(blocks))
-	maxParallelRequests := int64(10)
-	waitTime := 50 * time.Millisecond
-	waitAfterNumberOfRequests := int64(100)
 
 	restyClient := resty.New()
 	log.Info("getting latest block")
@@ -108,10 +94,14 @@ func loadBlocks(
 	waitGroup := &sync.WaitGroup{}
 	log.Info("getting blocks")
 	initialTime := time.Now()
+	ticker := time.NewTicker(saveEvery)
+	defer ticker.Stop()
 	for i := nextHeightToFetch; i < latestBlock.Height; i++ {
 		select {
 		case <-done:
 			return blocks, ctx.Err()
+		case <-ticker.C:
+			persistBlocks(blocks, log, fileName)
 		default:
 			waitGroup.Add(1)
 			go func(height int64) {
@@ -160,6 +150,20 @@ func loadBlocks(
 	return blocks, nil
 }
 
+func persistBlocks(blocks []*entity.Block, log *logrus.Entry, fileName string) {
+	if len(blocks) == 0 {
+		log.Warn("no blocks to save")
+		return
+	}
+
+	log.WithField("number_of_blocks", len(blocks)).Info("saving blocks")
+	writeCtx := context.Background()
+
+	if err := persistence.WriteBlocks(writeCtx, fileName, blocks); err != nil {
+		log.WithError(err).Error("problem saving blocks")
+	}
+}
+
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -181,7 +185,9 @@ func main() {
 	}()
 
 	fileName := "blocks.csv"
-	blocks, err := loadBlocks(ctx, log, fileName)
+	blocks, err := loadBlocks(
+		ctx, log, fileName, 10*time.Minute, 50*time.Millisecond, 10, 100,
+	)
 	if err != nil && err != context.Canceled {
 		log.WithError(err).Fatal("problem loading blocks")
 	}
