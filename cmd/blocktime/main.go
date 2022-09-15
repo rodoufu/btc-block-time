@@ -182,18 +182,28 @@ func main() {
 
 	fileName := "blocks.csv"
 	blocks, err := loadBlocks(ctx, log, fileName)
-	if err != nil {
+	if err != nil && err != context.Canceled {
 		log.WithError(err).Fatal("problem loading blocks")
 	}
 
 	lenBlocks := len(blocks)
+	maxMineTime := time.Nanosecond
+	countMoreThan2Hours := 0
 	for i := 0; i < lenBlocks-1; i++ {
 		mineTime := blocks[i+1].Timestamp.Sub(blocks[i].Timestamp)
+		if mineTime > maxMineTime {
+			maxMineTime = mineTime
+		}
 		if mineTime > 2*time.Hour {
+			countMoreThan2Hours++
 			log.WithFields(logrus.Fields{
 				"mine_time": mineTime,
 				"height":    i + 1,
 			}).Info("mining took more than 2 hours")
 		}
 	}
+	log.WithFields(logrus.Fields{
+		"max_mine_time":                       maxMineTime,
+		"count_mine_time_larger_than_2_hours": countMoreThan2Hours,
+	}).Info("checked all mining times")
 }
