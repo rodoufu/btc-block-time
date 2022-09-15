@@ -16,12 +16,12 @@ Each Bitcoin block mining is an independent operation, so one taking more than 1
 Blocks taking more than the usual to mine is an operation that does not happen that often if compared to the total number of blocks.
 So it is a good fit for a Poisson distribution, where:
 ```math
-P(X=x) = e^_{-\lambda} \frac{\lambda^x}{x!}
+P(X=x) = e^{-\lambda} \frac{\lambda^x}{x!}
 ```
-Being 12 the average number of blocks in 120 minutes we have $\lambda=12$, so for no blocks being generated in 120 minutes ($x=0$), then we have:
+Being 12 the average number of blocks in 120 minutes we have $\lambda=12$, so for no blocks being generated in 120 minutes ( $x=0$ ), then we have:
 ```math
 P(X=0) = 0.00000614421235332821
 ```
-So it has a chance of 1 in 162755 of happening ($1/P(X=0) = 162754.79141900392$),
+So it has a chance of 1 in 162755 of happening ( $\frac{1}{P(X=0)} = 162754.79141900392$ ),
 
 The service does this math, fetches the blocks than verifies how many times it has happened until now.
