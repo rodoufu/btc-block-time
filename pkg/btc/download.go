@@ -24,7 +24,7 @@ func getBlock(ctx context.Context, client *resty.Client, param string) (*Block, 
 	if err = json.Unmarshal(body, &blockResp); err != nil {
 		return nil, errors.Wrapf(err, "problem parsing block response for block: %v", param)
 	}
-	if blockResp == nil || !blockResp.IsValid() {
+	if !blockResp.IsValid() {
 		return nil, fmt.Errorf("invalid block response")
 	}
 	return blockResp.Data, nil

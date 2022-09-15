@@ -11,29 +11,20 @@ import (
 	"github.com/go-resty/resty/v2"
 	"github.com/sirupsen/logrus"
 
+	"github.com/rodoufu/btc-block-time/pkg/blockchain"
 	"github.com/rodoufu/btc-block-time/pkg/btc"
+	"github.com/rodoufu/btc-block-time/pkg/entity"
 	"github.com/rodoufu/btc-block-time/pkg/persistence"
 )
 
-func main() {
-	logger := logrus.New()
-	formatter := &logrus.TextFormatter{}
-	formatter.TimestampFormat = "2006-01-02 15:04:05"
-	logger.SetFormatter(formatter)
-	log := logger.WithFields(logrus.Fields{})
-	ctx, cancel := context.WithCancel(context.Background())
-	done := ctx.Done()
+func loadBlocks(
+	ctx context.Context, log *logrus.Entry, fileName string,
+) ([]*entity.Block, error) {
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithCancel(ctx)
 	defer cancel()
+	done := ctx.Done()
 
-	c := make(chan os.Signal)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-c
-		log.Warn("got signal")
-		cancel()
-	}()
-
-	fileName := "blocks.csv"
 	log.Info("reading blocks")
 	blocks, err := persistence.ReadBlocks(ctx, fileName)
 	if err != nil {
@@ -56,7 +47,7 @@ func main() {
 	}()
 
 	nextHeightToFetch := int64(len(blocks))
-	maxParallelRequests := int64(1)
+	maxParallelRequests := int64(10)
 	waitTime := 50 * time.Millisecond
 	waitAfterNumberOfRequests := int64(100)
 
@@ -67,15 +58,14 @@ func main() {
 	if err != nil {
 		log.WithError(err).Fatal("problem getting latest block")
 	}
-	log = log.WithFields(logrus.Fields{
+	log.WithFields(logrus.Fields{
 		"first_height": nextHeightToFetch,
 		"last_height":  latestBlock.Height,
-	})
-	log.WithField("height", latestBlock.Height).Info("got latest block")
+	}).Info("got latest block")
 
-	blocksChan := make(chan *btc.Block, maxParallelRequests)
+	blocksChan := make(chan *entity.Block, maxParallelRequests)
 	defer close(blocksChan)
-	heightBlock := map[int64]*btc.Block{}
+	heightBlock := map[int64]*entity.Block{}
 
 	log.Info("starting routine to add blocks")
 	go func() {
@@ -117,21 +107,33 @@ func main() {
 
 	waitGroup := &sync.WaitGroup{}
 	log.Info("getting blocks")
+	initialTime := time.Now()
 	for i := nextHeightToFetch; i < latestBlock.Height; i++ {
 		select {
 		case <-done:
-			return
+			return blocks, ctx.Err()
 		default:
 			waitGroup.Add(1)
 			go func(height int64) {
 				defer waitGroup.Done()
-				block, blockErr := btc.GetBlock(ctx, restyClient, height)
-				if blockErr != nil {
-					log.WithError(blockErr).WithField("height", height).Error("problem fetching block")
-					cancel()
-					return
+
+				if height%maxParallelRequests == 0 {
+					block, blockErr := btc.GetBlock(ctx, restyClient, height)
+					if blockErr != nil {
+						log.WithError(blockErr).WithField("height", height).Error("problem fetching block")
+						cancel()
+						return
+					}
+					blocksChan <- block.ToBlock()
+				} else {
+					block, blockErr := blockchain.GetBlock(ctx, restyClient, height)
+					if blockErr != nil {
+						log.WithError(blockErr).WithField("height", height).Error("problem fetching block")
+						cancel()
+						return
+					}
+					blocksChan <- block.ToBlock()
 				}
-				blocksChan <- block
 			}(i)
 
 			if (i-nextHeightToFetch)%maxParallelRequests == maxParallelRequests-1 {
@@ -139,11 +141,59 @@ func main() {
 			}
 
 			if (i-nextHeightToFetch)%waitAfterNumberOfRequests == waitAfterNumberOfRequests-1 {
-				log.WithField("height", i).Info("loading blocks")
+				soFar := time.Now().Sub(initialTime)
+				blockCount := i - nextHeightToFetch + 1
+				blockTime := time.Millisecond * time.Duration(soFar.Milliseconds()/blockCount)
+				timeToFinish := time.Duration(latestBlock.Height-i) * blockTime
+				log.WithFields(logrus.Fields{
+					"height":         i,
+					"block_count":    blockCount,
+					"block_time":     blockTime,
+					"time_to_finish": timeToFinish,
+				}).Info("loading blocks")
 				time.Sleep(waitTime)
 			}
 		}
 	}
 
 	waitGroup.Wait()
+	return blocks, nil
+}
+
+func main() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	formatter := &logrus.TextFormatter{}
+	formatter.TimestampFormat = "2006-01-02 15:04:05"
+	formatter.FullTimestamp = true
+
+	logger := logrus.New()
+	logger.SetFormatter(formatter)
+	log := logger.WithFields(logrus.Fields{})
+
+	c := make(chan os.Signal)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		signalValue := <-c
+		log.WithField("signal", signalValue).Warn("got signal")
+		cancel()
+	}()
+
+	fileName := "blocks.csv"
+	blocks, err := loadBlocks(ctx, log, fileName)
+	if err != nil {
+		log.WithError(err).Fatal("problem loading blocks")
+	}
+
+	lenBlocks := len(blocks)
+	for i := 0; i < lenBlocks-1; i++ {
+		mineTime := blocks[i+1].Timestamp.Sub(blocks[i].Timestamp)
+		if mineTime > 2*time.Hour {
+			log.WithFields(logrus.Fields{
+				"mine_time": mineTime,
+				"height":    i + 1,
+			}).Info("mining took more than 2 hours")
+		}
+	}
 }

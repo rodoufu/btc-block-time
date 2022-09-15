@@ -1,4 +1,4 @@
-package btc
+package blockchain
 
 import (
 	"time"
@@ -9,7 +9,7 @@ import (
 type Block struct {
 	Height    int64  `json:"height"`
 	Hash      string `json:"hash"`
-	Timestamp int64  `json:"timestamp"`
+	Timestamp int64  `json:"time"`
 }
 
 func (b *Block) ToBlock() *entity.Block {
@@ -24,13 +24,9 @@ func (b *Block) ToBlock() *entity.Block {
 }
 
 type BlockResp struct {
-	Data    *Block `json:"data"`
-	ErrCode int    `json:"err_code"`
-	ErrNo   int    `json:"err_no"`
-	Message string `json:"message"`
-	Status  string `json:"status"`
+	Blocks []*Block `json:"blocks"`
 }
 
 func (r *BlockResp) IsValid() bool {
-	return r.ErrCode == 0 && r.Data != nil
+	return r != nil && len(r.Blocks) > 0
 }

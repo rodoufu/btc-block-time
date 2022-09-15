@@ -7,12 +7,14 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/pkg/errors"
-	"github.com/rodoufu/btc-block-time/pkg/btc"
+
+	"github.com/rodoufu/btc-block-time/pkg/entity"
 )
 
-func ReadBlocks(ctx context.Context, fileName string) ([]*btc.Block, error) {
+func ReadBlocks(ctx context.Context, fileName string) ([]*entity.Block, error) {
 	csvFile, err := os.Open(fileName)
 	if err != nil {
 		return nil, errors.Wrapf(err, "problem opening: %v", fileName)
@@ -24,7 +26,7 @@ func ReadBlocks(ctx context.Context, fileName string) ([]*btc.Block, error) {
 		return nil, nil
 	}
 	var lineNumber int64 = 0
-	var blocks []*btc.Block
+	var blocks []*entity.Block
 	for {
 		var record []string
 		record, err = csvReader.Read()
@@ -52,16 +54,16 @@ func ReadBlocks(ctx context.Context, fileName string) ([]*btc.Block, error) {
 			return nil, errors.Wrapf(err, "invalid timestamp '%v' at line %v", record[1], lineNumber)
 		}
 
-		blocks = append(blocks, &btc.Block{
+		blocks = append(blocks, &entity.Block{
 			Height:    height,
-			Timestamp: timestamp,
+			Timestamp: time.UnixMilli(timestamp * 1000),
 			Hash:      record[2],
 		})
 	}
 	return blocks, nil
 }
 
-func WriteBlocks(ctx context.Context, fileName string, blocks []*btc.Block) error {
+func WriteBlocks(ctx context.Context, fileName string, blocks []*entity.Block) error {
 	if _, err := os.Stat(fileName); err == nil || !errors.Is(err, os.ErrNotExist) {
 		if errRemove := os.Remove(fileName); errRemove != nil {
 			return errors.Wrapf(errRemove, "problme removing file: %v", fileName)
@@ -84,7 +86,7 @@ func WriteBlocks(ctx context.Context, fileName string, blocks []*btc.Block) erro
 		lineNumber++
 		if err = csvWriter.Write([]string{
 			strconv.FormatInt(block.Height, 10),
-			strconv.FormatInt(block.Timestamp, 10),
+			strconv.FormatInt(block.Timestamp.UnixMilli()/1000, 10),
 			block.Hash,
 		}); err != nil {
 			return errors.Wrapf(err, "problem writing line: %v", lineNumber)
