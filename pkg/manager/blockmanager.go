@@ -53,6 +53,7 @@ func (bm *blockManager) LoadBlocks(ctx context.Context, log *logrus.Entry) error
 	log.Info("scheduling write blocks")
 	defer bm.persistBlocks(log)
 
+	// The latest block already saved
 	nextHeightToFetch := int64(len(bm.blocks))
 
 	if bm.latestBlock == nil {
@@ -72,9 +73,10 @@ func (bm *blockManager) LoadBlocks(ctx context.Context, log *logrus.Entry) error
 	bm.blocksChan = make(chan *entity.Block, bm.maxParallelRequests)
 	defer close(bm.blocksChan)
 
-	log.Info("starting routine to add blocks")
+	log.Info("starting routine to add blocks to the memory")
 	go bm.saveInMemory(ctx)
 
+	log.Info("starting routine to fetch blocks by day, backwards")
 	go func() {
 		bm.fetchBlocksBackwards(ctx, log)
 		cancel()
@@ -150,11 +152,9 @@ func (bm *blockManager) fetchBlocksBackwards(ctx context.Context, log *logrus.En
 			timeToFinish := time.Duration(bm.blocksBackwards[len(bm.blocksBackwards)-1].Height-bm.blocks[len(bm.blocks)-1].Height) * blockTime
 
 			log.WithFields(logrus.Fields{
-				"block_count_request": len(blocksBackwards),
-				"block_count":         blockCount,
-				"time_to_finish":      timeToFinish,
-				//"first_block_backwards": fmt.Sprintf("%+v", *firstBlockBackwards),
-				//"last_block":            fmt.Sprintf("%+v", *bm.blocks[len(bm.blocks)-1]),
+				"block_count_request":          len(blocksBackwards),
+				"block_count":                  blockCount,
+				"time_to_finish":               timeToFinish,
 				"first_block_backwards_height": firstBlockBackwards.Height,
 				"last_block_height":            bm.blocks[len(bm.blocks)-1].Height,
 			}).Info("got blocks")
@@ -182,6 +182,7 @@ func (bm *blockManager) fetchBlock(
 		go func(height int64) {
 			defer waitGroup.Done()
 
+			// BTC.com rate limits much faster than Blockchain.com
 			if height%bm.maxParallelRequests == 0 {
 				block, blockErr := btc.GetBlock(ctx, bm.client, height)
 				if blockErr != nil {

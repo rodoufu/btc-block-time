@@ -49,6 +49,7 @@ func main() {
 	var err error
 	done := ctx.Done()
 
+	// Fetching blocks
 FindBlocks:
 	for bm.ShouldLoad() {
 		select {
@@ -63,5 +64,6 @@ FindBlocks:
 		}
 	}
 
+	// Checking the number of blocks that took more than 2 hours to be mined
 	bm.CheckLongerThan(log, 2*time.Hour)
 }
