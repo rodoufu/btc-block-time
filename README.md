@@ -14,6 +14,8 @@ The initial version of the service was using 1 source, then I noticed me getting
 But even two sources would not be fast enough to collect the data block by block. 
 So I dig in the API to find an endpoint that would answer with more blocks per request, so the request for all the blocks by day were added.
 
+I have not added a build system or many unit tests cause it is basically a script to find the answers for that problem, it is not supposed to be a production ready service, but if you expect that please let me know.
+
 ## Block mining time of more than 2 hours
 
 Each Bitcoin block mining is an independent operation, so one taking more than 10 minutes to be mined does not mean the next one will take as well.
